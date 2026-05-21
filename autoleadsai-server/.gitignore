@@ -1,0 +1,8 @@
+﻿node_modules
+.env
+.env.*
+logs
+n8n-data
+dist
+coverage
+.DS_Store
