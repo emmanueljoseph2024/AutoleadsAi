@@ -153,6 +153,15 @@ export default function SignupPage() {
 
                 </div>
 
+                <div className="flex justify-end mb-2">
+                  <Link
+                    to="/forgot-password"
+                    className="inline-flex items-center rounded-full border border-blue-100 bg-blue-50 px-4 py-2 text-sm sm:text-base text-blue-600 font-semibold shadow-sm hover:border-blue-200 hover:bg-blue-100 transition-all"
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
+
                 <button
                   type="submit"
                   className="w-full bg-blue-600 hover:bg-blue-700 transition-all text-white rounded-4xl py-4 text-sm sm:text-base md:text-lg font-bold shadow-xl shadow-blue-200"
