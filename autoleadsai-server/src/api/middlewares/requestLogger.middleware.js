@@ -1,6 +1,20 @@
 import { logger } from '../../utils/logger.js';
 
 export const requestLogger = (req, res, next) => {
-  logger.info({ method: req.method, url: req.url, ip: req.ip });
+  const start = Date.now();
+
+  // Log when response finishes
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    logger.info({
+      method: req.method,
+      url: req.originalUrl,
+      status: res.statusCode,
+      duration: `${duration}ms`,
+      ip: req.ip,
+      userId: req.user?._id || 'unauthenticated',
+    });
+  });
+
   next();
 };

@@ -1,0 +1,20 @@
+// src/models/index.js
+export { default as User } from './User.model.js';
+export { default as Lead } from './Lead.model.js';
+export { default as Workflow } from './Workflow.model.js';
+export { default as Scan } from './Scan.model.js';
+export { default as ScanJob } from './ScanJob.model.js';
+export { default as EmailLog } from './EmailLog.model.js';
+export { default as EventLog } from './EventLog.model.js';
+export { default as Subscription } from './Subscription.model.js';
+export { default as Transaction } from './Transaction.model.js';
+export { default as Invoice } from './Invoice.model.js';
+export { default as PaymentMethod } from './PaymentMethod.model.js';
+export { default as ApiKey } from './ApiKey.model.js';
+export { default as RefreshToken } from './RefreshToken.model.js';
+export { default as BlacklistedToken } from './BlacklistedToken.model.js';
+export { default as SlackIntegration } from './SlackIntegration.model.js';
+export { default as CrmIntegration } from './CrmIntegration.model.js';
+export { default as EmailProvider } from './EmailProvider.model.js';
+export { default as Team } from './Team.model.js';
+export { default as TeamInvite } from './TeamInvite.model.js';
