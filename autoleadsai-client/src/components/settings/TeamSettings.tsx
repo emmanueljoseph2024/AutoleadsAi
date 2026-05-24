@@ -19,7 +19,6 @@ import EmptyState from '../common/EmptyState';
 import { SkeletonList } from '../common/Skeleton';
 import { sanitizeString, sanitizeEmail } from '../../utils/sanitizers';
 import { isValidEmail } from '../../utils/validators';
-import { API_ENDPOINTS } from '../../utils/constants';
 import api from '../../services/api';
 
 interface TeamMember {
