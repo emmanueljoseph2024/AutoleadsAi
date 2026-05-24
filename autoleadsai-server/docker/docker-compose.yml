@@ -1,0 +1,163 @@
+version: '3.8'
+
+services:
+  # ─── MongoDB ──────────────────────────────────────
+  mongodb:
+    image: mongo:7
+    container_name: autoleadsai-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: autoleadsai
+    volumes:
+      - mongodb_data:/data/db
+    ports:
+      - "27017:27017"
+    networks:
+      - autoleadsai-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Redis ────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: autoleadsai-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - autoleadsai-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── n8n (AI & Automation Engine) ─────────────────
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: autoleadsai-n8n
+    restart: unless-stopped
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER:-admin}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD:-admin}
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - NODE_ENV=production
+      - WEBHOOK_URL=http://n8n:5678/
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=168
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./src/n8n/workflows:/home/node/.n8n/workflows
+    ports:
+      - "5678:5678"
+    networks:
+      - autoleadsai-network
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ─── AutoLeadsAI API Server ───────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: autoleadsai-api
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - MONGODB_URI=mongodb://mongodb:27017/autoleadsai
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+      - N8N_API_URL=http://n8n:5678
+      - N8N_WEBHOOK_BASE=http://n8n:5678/webhook
+      - CLIENT_URL=${CLIENT_URL:-http://localhost:5173}
+      - PADDLE_API_KEY=${PADDLE_API_KEY}
+      - PADDLE_WEBHOOK_SECRET=${PADDLE_WEBHOOK_SECRET}
+      - PADDLE_SANDBOX=${PADDLE_SANDBOX:-true}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+      - EMAIL_FROM=${EMAIL_FROM:-noreply@autoleadsai.com}
+      - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-AutoLeads AI}
+    volumes:
+      - api_logs:/app/logs
+    ports:
+      - "3000:3000"
+    networks:
+      - autoleadsai-network
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      n8n:
+        condition: service_started
+
+  # ─── Worker Service ───────────────────────────────
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: autoleadsai-worker
+    restart: unless-stopped
+    command: node src/workers/index.js
+    environment:
+      - NODE_ENV=production
+      - MONGODB_URI=mongodb://mongodb:27017/autoleadsai
+      - REDIS_URL=redis://redis:6379
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+      - N8N_API_URL=http://n8n:5678
+      - N8N_WEBHOOK_BASE=http://n8n:5678/webhook
+      - CLIENT_URL=${CLIENT_URL:-http://localhost:5173}
+      - PADDLE_API_KEY=${PADDLE_API_KEY}
+      - PADDLE_WEBHOOK_SECRET=${PADDLE_WEBHOOK_SECRET}
+      - SLACK_CLIENT_ID=${SLACK_CLIENT_ID}
+      - SLACK_CLIENT_SECRET=${SLACK_CLIENT_SECRET}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+    volumes:
+      - worker_logs:/app/logs
+    networks:
+      - autoleadsai-network
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      n8n:
+        condition: service_started
+
+# ─── Volumes ──────────────────────────────────────────
+volumes:
+  mongodb_data:
+    driver: local
+  redis_data:
+    driver: local
+  n8n_data:
+    driver: local
+  api_logs:
+    driver: local
+  worker_logs:
+    driver: local
+
+# ─── Network ──────────────────────────────────────────
+networks:
+  autoleadsai-network:
+    driver: bridge

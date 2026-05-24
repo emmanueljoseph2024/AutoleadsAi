@@ -18,3 +18,7 @@ export { default as CrmIntegration } from './CrmIntegration.model.js';
 export { default as EmailProvider } from './EmailProvider.model.js';
 export { default as Team } from './Team.model.js';
 export { default as TeamInvite } from './TeamInvite.model.js';
+export { default as Niche } from './Niche.model.js';
+export { default as AIInsight } from './AIInsight.model.js';
+export { default as MessageTemplate } from './MessageTemplate.model.js';
+export { default as NurtureSequence } from './NurtureSequence.model.js';

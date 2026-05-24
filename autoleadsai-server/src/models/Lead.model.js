@@ -62,6 +62,11 @@ const leadSchema = new mongoose.Schema(
       },
     ],
     externalCrmId: String,
+    nicheId: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: 'Niche',
+  index: true,
+},
   },
   {
     timestamps: true,

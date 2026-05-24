@@ -27,6 +27,11 @@ const scanSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    nicheId: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: 'Niche',
+  index: true,
+},
     results: [
       {
         source: String,

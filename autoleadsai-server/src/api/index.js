@@ -8,6 +8,7 @@ import dashboardRouter from './routes/dashboard.routes.js';
 import billingRouter from './routes/billing.routes.js';
 import webhookRouter from './routes/webhook.routes.js';
 import adminRouter from './routes/admin.routes.js';
+import nicheRouter from './routes/niche.routes.js';
 
 const apiRouter = Router();
 
@@ -20,5 +21,7 @@ apiRouter.use('/dashboard', dashboardRouter);
 apiRouter.use('/billing', billingRouter);
 apiRouter.use('/webhooks', webhookRouter);
 apiRouter.use('/admin', adminRouter);
+apiRouter.use('/niches', nicheRouter);
+
 
 export default apiRouter;
