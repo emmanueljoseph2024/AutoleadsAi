@@ -1,9 +1,18 @@
 ﻿import './App.css'
 
 import { lazy, Suspense, type ComponentType, type LazyExoticComponent } from 'react'
-import { createBrowserRouter, RouterProvider } from 'react-router-dom'
+import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom'
 import ErrorPage from './ErrorPage.tsx'
+import { AuthProvider, useAuth } from './contexts/AuthContext.tsx'   // <-- new import
 
+// ------------------------------------------------------------
+// Lazy load the Dashboard (placeholder – replace with real path)
+// ------------------------------------------------------------
+const DashboardPage = lazy(() => import('./pages/dashboard/DashboardPage.tsx'))
+
+// ------------------------------------------------------------
+// Loading spinner (same as before)
+// ------------------------------------------------------------
 const Loading = () => (
   <div className="loading-overlay" role="status" aria-live="polite">
     <div className="loading-card">
@@ -14,12 +23,38 @@ const Loading = () => (
   </div>
 )
 
+// ------------------------------------------------------------
+// Helper to wrap a lazy component with Suspense
+// ------------------------------------------------------------
 const renderPage = (Component: LazyExoticComponent<ComponentType>) => (
   <Suspense fallback={<Loading />}>
     <Component />
   </Suspense>
 )
 
+// ------------------------------------------------------------
+// Protected route – redirects to /login if not authenticated
+// ------------------------------------------------------------
+const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
+  const { user, loading } = useAuth()
+  if (loading) return <Loading />
+  if (!user) return <Navigate to="/login" replace />
+  return children
+}
+
+// ------------------------------------------------------------
+// Public-only route – redirects to /dashboard if already logged in
+// ------------------------------------------------------------
+const PublicOnlyRoute = ({ children }: { children: JSX.Element }) => {
+  const { user, loading } = useAuth()
+  if (loading) return <Loading />
+  if (user) return <Navigate to="/dashboard" replace />
+  return children
+}
+
+// ------------------------------------------------------------
+// Lazy imports for all landing / content pages (unchanged)
+// ------------------------------------------------------------
 const LandingPage = lazy(() => import('./pages/landingPages/LandingPage.tsx'))
 const FeaturesPage = lazy(() => import('./pages/landingPages/Features.tsx'))
 const LoginPage = lazy(() => import('./pages/landingPages/LoginPage.tsx'))
@@ -77,6 +112,9 @@ const SecurityPrivacyHelpCenterPage = lazy(() => import('./pages/helpCenterPages
 const IntegrationsHelpCenterPage = lazy(() => import('./pages/helpCenterPages/Integration.tsx'))
 const AccountSettingsHelpCenterPage = lazy(() => import('./pages/helpCenterPages/AccountSetting.tsx'))
 
+// ------------------------------------------------------------
+// App component – now wraps everything in AuthProvider
+// ------------------------------------------------------------
 function App() {
   const routes = createBrowserRouter([
     {
@@ -86,12 +124,29 @@ function App() {
     },
     {
       path: '/login',
-      element: renderPage(LoginPage),
+      element: (
+        <PublicOnlyRoute>
+          {renderPage(LoginPage)}
+        </PublicOnlyRoute>
+      ),
     },
     {
       path: '/signup',
-      element: renderPage(SignupPage),
+      element: (
+        <PublicOnlyRoute>
+          {renderPage(SignupPage)}
+        </PublicOnlyRoute>
+      ),
     },
+    {
+      path: '/dashboard',
+      element: (
+        <ProtectedRoute>
+          {renderPage(DashboardPage)}
+        </ProtectedRoute>
+      ),
+    },
+    // All public routes remain unchanged
     {
       path: '/how-it-works',
       element: renderPage(HowItWorksPage),
@@ -310,7 +365,11 @@ function App() {
     },
   ])
 
-  return <RouterProvider router={routes} />
+  return (
+    <AuthProvider>
+      <RouterProvider router={routes} />
+    </AuthProvider>
+  )
 }
 
 export default App
