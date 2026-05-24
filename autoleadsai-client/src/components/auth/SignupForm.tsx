@@ -1,11 +1,22 @@
 // src/pages/auth/SignupPage.tsx
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { FiMail, FiLock, FiEye, FiEyeOff, FiUser, FiCheck, FiX, FiAlertCircle } from 'react-icons/fi';
 import { useAuth } from '../../contexts/AuthContext';
-import { FiMail, FiLock, FiEye, FiEyeOff, FiUser, FiAlertCircle, FiCheck, FiX } from 'react-icons/fi';
-import { FcGoogle } from 'react-icons/fc';
+import Input from '../../components/common/Input';
+import Button from '../../components/common/Button';
+import Spinner from '../../components/common/Spinner';
+import Toast from '../../components/common/Toast';
+import OAuthButtons from '../../components/auth/OAuthButtons';
 import AutoleadsAiLogo from '../../assets/AutoleadsAiLogo.svg';
+import { sanitizeString, normalizeName } from '../../utils/sanitizers';
+import { isValidEmail, getPasswordStrength } from '../../utils/validators';
+
+interface SignupError {
+  field: string;
+  message: string;
+}
 
 const SignupPage = () => {
   const navigate = useNavigate();
@@ -20,57 +31,98 @@ const SignupPage = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [agreed, setAgreed] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [errors, setErrors] = useState<SignupError[]>([]);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
-  const getPasswordStrength = (pwd: string) => {
-    let score = 0;
-    if (pwd.length >= 8) score++;
-    if (/[A-Z]/.test(pwd)) score++;
-    if (/[a-z]/.test(pwd)) score++;
-    if (/[0-9]/.test(pwd)) score++;
-    if (/[!@#$%^&*(),.?":{}|<>]/.test(pwd)) score++;
-    return score;
-  };
-
-  const strength = getPasswordStrength(password);
-  const strengthColors = ['bg-[#EF4444]', 'bg-[#F59E0B]', 'bg-[#F59E0B]', 'bg-[#22C55E]', 'bg-[#22C55E]'];
-  const strengthLabels = ['', 'Weak', 'Fair', 'Good', 'Strong'];
+  const passwordStrength = password ? getPasswordStrength(password) : { isValid: false, errors: [] };
   const passwordsMatch = confirmPassword ? password === confirmPassword : true;
+
+  const validate = useCallback(() => {
+    const newErrors: SignupError[] = [];
+
+    if (!firstName.trim()) {
+      newErrors.push({ field: 'firstName', message: 'First name is required' });
+    } else if (firstName.length > 50) {
+      newErrors.push({ field: 'firstName', message: 'First name is too long' });
+    }
+
+    if (!lastName.trim()) {
+      newErrors.push({ field: 'lastName', message: 'Last name is required' });
+    } else if (lastName.length > 50) {
+      newErrors.push({ field: 'lastName', message: 'Last name is too long' });
+    }
+
+    const trimmedEmail = email.trim().toLowerCase();
+    if (!trimmedEmail) {
+      newErrors.push({ field: 'email', message: 'Email is required' });
+    } else if (!isValidEmail(trimmedEmail)) {
+      newErrors.push({ field: 'email', message: 'Please enter a valid email address' });
+    }
+
+    if (!password) {
+      newErrors.push({ field: 'password', message: 'Password is required' });
+    } else if (!passwordStrength.isValid) {
+      newErrors.push({ field: 'password', message: 'Password does not meet strength requirements' });
+    }
+
+    if (!confirmPassword) {
+      newErrors.push({ field: 'confirmPassword', message: 'Please confirm your password' });
+    } else if (!passwordsMatch) {
+      newErrors.push({ field: 'confirmPassword', message: 'Passwords do not match' });
+    }
+
+    if (!agreed) {
+      newErrors.push({ field: 'terms', message: 'You must agree to the Terms of Service' });
+    }
+
+    setErrors(newErrors);
+    return newErrors.length === 0;
+  }, [firstName, lastName, email, password, confirmPassword, agreed, passwordStrength.isValid, passwordsMatch]);
+
+  const getFieldError = (field: string) => errors.find((e) => e.field === field)?.message;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
 
-    if (!agreed) {
-      setError('Please agree to the Terms of Service and Privacy Policy');
-      return;
-    }
+    if (!validate()) return;
 
-    if (password !== confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
-
-    if (strength < 3) {
-      setError('Please use a stronger password');
-      return;
-    }
+    const sanitizedData = {
+      firstName: normalizeName(sanitizeString(firstName)),
+      lastName: normalizeName(sanitizeString(lastName)),
+      email: sanitizeString(email.trim().toLowerCase()),
+      password,
+    };
 
     setLoading(true);
 
     try {
-      await signup({ firstName, lastName, email, password });
+      await signup(sanitizedData);
       navigate('/dashboard');
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Something went wrong');
+      const status = err?.response?.status;
+      const serverMessage = err?.response?.data?.error;
+
+      if (status === 409) {
+        setErrors([{ field: 'email', message: serverMessage || 'Email already registered' }]);
+        setToast({ message: serverMessage || 'Email already registered', type: 'error' });
+      } else if (status === 400) {
+        setToast({ message: serverMessage || 'Invalid input. Please check your details.', type: 'error' });
+      } else {
+        setToast({ message: 'Something went wrong. Please try again.', type: 'error' });
+      }
     } finally {
       setLoading(false);
     }
   };
 
+  // Clear individual field errors when user types
+  const clearFieldError = (field: string) => {
+    setErrors((prev) => prev.filter((e) => e.field !== field));
+  };
+
   return (
-    <div className="min-h-screen flex flex-col lg:flex-row">
-      {/* Left Panel - Branding */}
+    <div className="min-h-screen flex flex-col lg:flex-row bg-[#F9FAFB]">
+      {/* Left Panel — Branding */}
       <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-[#4F46E5] to-[#2563EB] items-center justify-center p-8 xl:p-12 relative overflow-hidden">
         <div className="absolute inset-0 opacity-10">
           <div className="absolute top-20 right-20 w-48 h-48 xl:w-64 xl:h-64 bg-white rounded-full blur-3xl" />
@@ -78,7 +130,7 @@ const SignupPage = () => {
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[400px] h-[400px] xl:w-[500px] xl:h-[500px] border border-white/20 rounded-full" />
         </div>
 
-        <div className="relative z-10 text-center max-w-lg">
+        <div className="relative z-10 text-center max-w-lg animate-fade-in">
           <div className="w-16 h-16 xl:w-20 xl:h-20 bg-white/20 backdrop-blur-sm rounded-2xl xl:rounded-3xl flex items-center justify-center mx-auto mb-6 xl:mb-8 shadow-lg">
             <img src={AutoleadsAiLogo} alt="AutoLeads AI" className="w-8 h-8 xl:w-10 xl:h-10" />
           </div>
@@ -88,26 +140,26 @@ const SignupPage = () => {
           </p>
 
           <div className="mt-8 xl:mt-12 space-y-3 xl:space-y-4">
-            <div className="flex items-center gap-3 bg-white/10 backdrop-blur-sm rounded-xl p-3 xl:p-4">
-              <FiCheck className="w-5 h-5 text-[#22C55E] flex-shrink-0" />
-              <span className="text-sm xl:text-base text-white">14-day free trial — no credit card required</span>
-            </div>
-            <div className="flex items-center gap-3 bg-white/10 backdrop-blur-sm rounded-xl p-3 xl:p-4">
-              <FiCheck className="w-5 h-5 text-[#22C55E] flex-shrink-0" />
-              <span className="text-sm xl:text-base text-white">AI-powered lead discovery & scoring</span>
-            </div>
-            <div className="flex items-center gap-3 bg-white/10 backdrop-blur-sm rounded-xl p-3 xl:p-4">
-              <FiCheck className="w-5 h-5 text-[#22C55E] flex-shrink-0" />
-              <span className="text-sm xl:text-base text-white">24/7 automated email outreach</span>
-            </div>
+            {[
+              '14-day free trial — no credit card required',
+              'AI-powered lead discovery & scoring',
+              '24/7 automated email outreach',
+            ].map((benefit) => (
+              <div
+                key={benefit}
+                className="flex items-center gap-3 bg-white/10 backdrop-blur-sm rounded-xl p-3 xl:p-4 transition-transform duration-200 hover:scale-[1.02]"
+              >
+                <FiCheck className="w-5 h-5 text-[#22C55E] flex-shrink-0" />
+                <span className="text-sm xl:text-base text-white">{benefit}</span>
+              </div>
+            ))}
           </div>
         </div>
       </div>
 
-      {/* Right Panel - Form */}
-      <div className="flex-1 flex items-center justify-center p-4 sm:p-6 lg:p-8 bg-[#F9FAFB] min-h-screen lg:min-h-0">
-        <div className="w-full max-w-sm sm:max-w-md lg:max-w-lg">
-          {/* Mobile Logo */}
+      {/* Right Panel — Form */}
+      <div className="flex-1 flex items-center justify-center p-4 sm:p-6 lg:p-8 min-h-screen lg:min-h-0">
+        <div className="w-full max-w-sm sm:max-w-md lg:max-w-lg animate-slide-up">
           <div className="lg:hidden text-center mb-6 sm:mb-8">
             <div className="w-14 h-14 sm:w-16 sm:h-16 bg-gradient-to-br from-[#2563EB] to-[#4F46E5] rounded-2xl flex items-center justify-center mx-auto mb-3 sm:mb-4 shadow-lg">
               <img src={AutoleadsAiLogo} alt="AutoLeads AI" className="w-7 h-7 sm:w-8 sm:h-8" />
@@ -121,191 +173,195 @@ const SignupPage = () => {
               <p className="text-sm sm:text-base text-[#6B7280] mt-1">Start your 14-day free trial</p>
             </div>
 
-            {error && (
-              <div className="mb-4 sm:mb-6 p-3 sm:p-4 bg-[#FEE2E2] border border-[#EF4444]/20 rounded-xl flex items-center gap-2 sm:gap-3 text-[#EF4444] text-xs sm:text-sm">
-                <FiAlertCircle className="w-4 h-4 sm:w-5 sm:h-5 flex-shrink-0" />
-                <span>{error}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
-              {/* Name Row */}
+            <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5" noValidate>
+              {/* Name Fields */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                <div>
-                  <label className="block text-xs sm:text-sm font-medium text-[#374151] mb-1.5 sm:mb-2">
-                    First Name
-                  </label>
-                  <div className="relative">
-                    <FiUser className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 text-[#9CA3AF]" />
-                    <input
-                      type="text"
-                      value={firstName}
-                      onChange={(e) => setFirstName(e.target.value)}
-                      placeholder="John"
-                      required
-                      className="w-full pl-10 sm:pl-12 pr-3 sm:pr-4 py-2.5 sm:py-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm sm:text-base text-[#111827] placeholder-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-transparent transition-all"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs sm:text-sm font-medium text-[#374151] mb-1.5 sm:mb-2">
-                    Last Name
-                  </label>
-                  <div className="relative">
-                    <FiUser className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 text-[#9CA3AF]" />
-                    <input
-                      type="text"
-                      value={lastName}
-                      onChange={(e) => setLastName(e.target.value)}
-                      placeholder="Doe"
-                      required
-                      className="w-full pl-10 sm:pl-12 pr-3 sm:pr-4 py-2.5 sm:py-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm sm:text-base text-[#111827] placeholder-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-transparent transition-all"
-                    />
-                  </div>
-                </div>
+                <Input
+                  label="First Name"
+                  type="text"
+                  value={firstName}
+                  onChange={(e) => {
+                    setFirstName(e.target.value);
+                    clearFieldError('firstName');
+                  }}
+                  placeholder="John"
+                  icon={<FiUser className="w-4 h-4 sm:w-5 sm:h-5" />}
+                  error={getFieldError('firstName')}
+                  autoComplete="given-name"
+                  maxLength={50}
+                />
+                <Input
+                  label="Last Name"
+                  type="text"
+                  value={lastName}
+                  onChange={(e) => {
+                    setLastName(e.target.value);
+                    clearFieldError('lastName');
+                  }}
+                  placeholder="Doe"
+                  icon={<FiUser className="w-4 h-4 sm:w-5 sm:h-5" />}
+                  error={getFieldError('lastName')}
+                  autoComplete="family-name"
+                  maxLength={50}
+                />
               </div>
 
               {/* Email */}
-              <div>
-                <label className="block text-xs sm:text-sm font-medium text-[#374151] mb-1.5 sm:mb-2">
-                  Email Address
-                </label>
-                <div className="relative">
-                  <FiMail className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 text-[#9CA3AF]" />
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="john@example.com"
-                    required
-                    className="w-full pl-10 sm:pl-12 pr-3 sm:pr-4 py-2.5 sm:py-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm sm:text-base text-[#111827] placeholder-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-transparent transition-all"
-                  />
-                </div>
-              </div>
+              <Input
+                label="Email Address"
+                type="email"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  clearFieldError('email');
+                }}
+                placeholder="john@example.com"
+                icon={<FiMail className="w-4 h-4 sm:w-5 sm:h-5" />}
+                error={getFieldError('email')}
+                autoComplete="email"
+                maxLength={255}
+              />
 
               {/* Password */}
               <div>
-                <label className="block text-xs sm:text-sm font-medium text-[#374151] mb-1.5 sm:mb-2">
-                  Password
-                </label>
-                <div className="relative">
-                  <FiLock className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 text-[#9CA3AF]" />
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="••••••••"
-                    required
-                    className="w-full pl-10 sm:pl-12 pr-10 sm:pr-12 py-2.5 sm:py-3 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm sm:text-base text-[#111827] placeholder-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-transparent transition-all"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 sm:right-4 top-1/2 -translate-y-1/2 text-[#9CA3AF] hover:text-[#6B7280] transition-colors"
-                    tabIndex={-1}
-                  >
-                    {showPassword ? (
+                <Input
+                  label="Password"
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    clearFieldError('password');
+                  }}
+                  placeholder="••••••••"
+                  icon={<FiLock className="w-4 h-4 sm:w-5 sm:h-5" />}
+                  rightIcon={
+                    showPassword ? (
                       <FiEyeOff className="w-4 h-4 sm:w-5 sm:h-5" />
                     ) : (
                       <FiEye className="w-4 h-4 sm:w-5 sm:h-5" />
-                    )}
-                  </button>
-                </div>
-                {/* Password Strength Indicator */}
+                    )
+                  }
+                  onRightIconClick={() => setShowPassword(!showPassword)}
+                  error={getFieldError('password')}
+                  autoComplete="new-password"
+                  maxLength={128}
+                />
                 {password && (
-                  <div className="mt-2">
+                  <div className="mt-2 animate-fade-in">
                     <div className="flex gap-1">
                       {[1, 2, 3, 4, 5].map((level) => (
                         <div
                           key={level}
                           className={`h-1.5 flex-1 rounded-full transition-all duration-300 ${
-                            level <= strength ? strengthColors[strength - 1] : 'bg-[#E5E7EB]'
+                            level <= 5 - passwordStrength.errors.length
+                              ? passwordStrength.isValid
+                                ? 'bg-[#22C55E]'
+                                : passwordStrength.errors.length <= 2
+                                ? 'bg-[#F59E0B]'
+                                : 'bg-[#EF4444]'
+                              : 'bg-[#E5E7EB]'
                           }`}
                         />
                       ))}
                     </div>
-                    <p className="text-[10px] sm:text-xs text-[#6B7280] mt-1">{strengthLabels[strength]}</p>
+                    <p className="text-[10px] sm:text-xs text-[#6B7280] mt-1">
+                      {passwordStrength.isValid
+                        ? 'Strong password'
+                        : 'Password strength: ' +
+                          (passwordStrength.errors.length <= 2 ? 'Moderate' : 'Weak')}
+                    </p>
                   </div>
                 )}
               </div>
 
               {/* Confirm Password */}
               <div>
-                <label className="block text-xs sm:text-sm font-medium text-[#374151] mb-1.5 sm:mb-2">
-                  Confirm Password
-                </label>
-                <div className="relative">
-                  <FiLock className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 w-4 h-4 sm:w-5 sm:h-5 text-[#9CA3AF]" />
-                  <input
-                    type={showConfirmPassword ? 'text' : 'password'}
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    placeholder="••••••••"
-                    required
-                    className={`w-full pl-10 sm:pl-12 pr-10 sm:pr-12 py-2.5 sm:py-3 bg-[#F9FAFB] border rounded-xl text-sm sm:text-base text-[#111827] placeholder-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-transparent transition-all ${
-                      confirmPassword && !passwordsMatch ? 'border-[#EF4444]' : 'border-[#E5E7EB]'
-                    }`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    className="absolute right-3 sm:right-4 top-1/2 -translate-y-1/2 text-[#9CA3AF] hover:text-[#6B7280] transition-colors"
-                    tabIndex={-1}
-                  >
-                    {showConfirmPassword ? (
+                <Input
+                  label="Confirm Password"
+                  type={showConfirmPassword ? 'text' : 'password'}
+                  value={confirmPassword}
+                  onChange={(e) => {
+                    setConfirmPassword(e.target.value);
+                    clearFieldError('confirmPassword');
+                  }}
+                  placeholder="••••••••"
+                  icon={<FiLock className="w-4 h-4 sm:w-5 sm:h-5" />}
+                  rightIcon={
+                    showConfirmPassword ? (
                       <FiEyeOff className="w-4 h-4 sm:w-5 sm:h-5" />
                     ) : (
                       <FiEye className="w-4 h-4 sm:w-5 sm:h-5" />
+                    )
+                  }
+                  onRightIconClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  error={getFieldError('confirmPassword')}
+                  autoComplete="new-password"
+                  maxLength={128}
+                />
+                {confirmPassword && (
+                  <p
+                    className={`text-[10px] sm:text-xs mt-1 flex items-center gap-1 animate-fade-in ${
+                      passwordsMatch ? 'text-[#22C55E]' : 'text-[#EF4444]'
+                    }`}
+                  >
+                    {passwordsMatch ? (
+                      <>
+                        <FiCheck className="w-3 h-3" /> Passwords match
+                      </>
+                    ) : (
+                      <>
+                        <FiX className="w-3 h-3" /> Passwords do not match
+                      </>
                     )}
-                  </button>
-                </div>
-                {confirmPassword && !passwordsMatch && (
-                  <p className="text-[10px] sm:text-xs text-[#EF4444] mt-1 flex items-center gap-1">
-                    <FiX className="w-3 h-3" /> Passwords do not match
-                  </p>
-                )}
-                {confirmPassword && passwordsMatch && (
-                  <p className="text-[10px] sm:text-xs text-[#22C55E] mt-1 flex items-center gap-1">
-                    <FiCheck className="w-3 h-3" /> Passwords match
                   </p>
                 )}
               </div>
 
               {/* Terms Checkbox */}
-              <div className="flex items-start gap-2 sm:gap-3">
-                <input
-                  type="checkbox"
-                  checked={agreed}
-                  onChange={(e) => setAgreed(e.target.checked)}
-                  className="mt-0.5 sm:mt-1 w-4 h-4 rounded border-[#D1D5DB] text-[#2563EB] focus:ring-[#2563EB]"
-                />
-                <span className="text-xs sm:text-sm text-[#6B7280]">
-                  I agree to the{' '}
-                  <Link to="/terms" className="text-[#2563EB] hover:underline">Terms of Service</Link>
-                  {' '}and{' '}
-                  <Link to="/privacy" className="text-[#2563EB] hover:underline">Privacy Policy</Link>
-                </span>
+              <div>
+                <div className="flex items-start gap-2 sm:gap-3">
+                  <input
+                    type="checkbox"
+                    id="terms"
+                    checked={agreed}
+                    onChange={(e) => {
+                      setAgreed(e.target.checked);
+                      clearFieldError('terms');
+                    }}
+                    className="mt-0.5 sm:mt-1 w-4 h-4 rounded border-[#D1D5DB] text-[#2563EB] focus:ring-[#2563EB] cursor-pointer"
+                  />
+                  <label htmlFor="terms" className="text-xs sm:text-sm text-[#6B7280] cursor-pointer select-none">
+                    I agree to the{' '}
+                    <Link to="/terms" className="text-[#2563EB] hover:underline">
+                      Terms of Service
+                    </Link>{' '}
+                    and{' '}
+                    <Link to="/privacy" className="text-[#2563EB] hover:underline">
+                      Privacy Policy
+                    </Link>
+                  </label>
+                </div>
+                {getFieldError('terms') && (
+                  <p className="text-[10px] sm:text-xs text-[#EF4444] mt-1 flex items-center gap-1 animate-fade-in">
+                    <FiAlertCircle className="w-3 h-3" />
+                    {getFieldError('terms')}
+                  </p>
+                )}
               </div>
 
-              {/* Submit */}
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full py-2.5 sm:py-3 bg-gradient-to-r from-[#2563EB] to-[#4F46E5] text-white rounded-xl font-semibold text-sm sm:text-base hover:shadow-lg hover:shadow-blue-500/25 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                {loading ? (
-                  <>
-                    <svg className="animate-spin w-4 h-4 sm:w-5 sm:h-5" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                    </svg>
-                    Creating account...
-                  </>
-                ) : (
-                  'Create Account'
-                )}
-              </button>
+              {/* Submit Button */}
+              <Button type="submit" loading={loading} disabled={loading} className="w-full" size="lg">
+                {loading ? 'Creating account...' : 'Create Account'}
+              </Button>
             </form>
+
+            {/* Loading Overlay with Spinner */}
+            {loading && (
+              <div className="mt-6 flex items-center justify-center gap-3 py-3 animate-fade-in">
+                <Spinner size="sm" />
+                <p className="text-sm text-[#6B7280]">Setting up your account...</p>
+              </div>
+            )}
 
             {/* Divider */}
             <div className="relative my-5 sm:my-6">
@@ -317,22 +373,27 @@ const SignupPage = () => {
               </div>
             </div>
 
-            {/* Google OAuth */}
-            <button className="w-full py-2.5 sm:py-3 bg-white border border-[#D1D5DB] rounded-xl text-sm sm:text-base font-medium text-[#374151] hover:bg-[#F9FAFB] transition-colors flex items-center justify-center gap-2 sm:gap-3">
-              <FcGoogle className="w-4 h-4 sm:w-5 sm:h-5" />
-              Continue with Google
-            </button>
+            <OAuthButtons />
 
-            {/* Login link */}
             <p className="mt-5 sm:mt-6 text-center text-xs sm:text-sm text-[#6B7280]">
               Already have an account?{' '}
-              <Link to="/login" className="text-[#2563EB] hover:text-[#1D4ED8] font-semibold transition-colors">
+              <Link
+                to="/login"
+                className="text-[#2563EB] hover:text-[#1D4ED8] font-semibold transition-colors"
+              >
                 Sign In
               </Link>
             </p>
           </div>
         </div>
       </div>
+
+      {/* Toast Notification */}
+      {toast && (
+        <div className="fixed top-4 right-4 z-50 animate-slide-down">
+          <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />
+        </div>
+      )}
     </div>
   );
 };

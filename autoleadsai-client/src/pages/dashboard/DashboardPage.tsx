@@ -1,6 +1,6 @@
 // src/pages/dashboard/DashboardPage.tsx
 
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import {
   FiSearch,
@@ -15,86 +15,146 @@ import {
   FiActivity,
   FiGrid,
   FiSettings,
-  FiExternalLink,
-  FiArrowUp,
-  FiMoreHorizontal,
-  FiMessageCircle,
+  FiMail,
+  FiCheckCircle,
   FiGlobe,
   FiTarget,
+  FiAlertCircle,
+  FiRefreshCw,
 } from 'react-icons/fi';
 import { FaLinkedinIn, FaRedditAlien } from 'react-icons/fa';
 import { SiX } from 'react-icons/si';
 import { useAuth } from '../../contexts/AuthContext';
 import AutoleadsAiLogo from '../../assets/AutoleadsAiLogo.svg';
+import StatCard from '../../components/common/StatCard';
+import SearchBar from '../../components/common/SearchBar';
+import Avatar from '../../components/common/Avatar';
+import { SkeletonStatCard, SkeletonChart } from '../../components/common/Skeleton';
+import { sanitizeString } from '../../utils/sanitizers';
+import { API_ENDPOINTS } from '../../utils/constants';
+import { formatDate } from '../../utils/formatDate';
+import api from '../../services/api';
 
 // ─── Types ────────────────────────────────────────────
-interface KpiStats {
-  qualifiedLeads: number;
-  conversionRate: number;
-  highIntentLeads: number;
-  qualifiedChange: number;
-  conversionChange: number;
-  intentChange: number;
+
+interface DashboardStats {
+  leads: {
+    total: { count: number; link: string };
+    hot: { count: number; link: string };
+    warm: { count: number; link: string };
+    cold: { count: number; link: string };
+    converted: { count: number; link: string };
+    conversionRate: string;
+    newThisWeek: { count: number; link: string };
+    newThisMonth: { count: number; link: string };
+  };
+  emails: {
+    sent: { count: number; link: string };
+    opened: { count: number; link: string };
+    replied: { count: number; link: string };
+    openRate: string;
+    replyRate: string;
+  };
+  scans: {
+    total: { count: number; link: string };
+    thisMonth: { count: number; link: string };
+  };
+  samples?: {
+    hotLeads: LeadSample[];
+    newThisWeek: LeadSample[];
+    converted: LeadSample[];
+  };
 }
 
-interface QualityDistribution {
-  high: { percentage: number; count: number };
-  medium: { percentage: number; count: number };
-  low: { percentage: number; count: number };
+interface LeadSample {
+  _id: string;
+  name: string;
+  email: string;
+  company: string;
+  source: string;
+  sourceUrl: string;
+  qualification: string;
+  status: string;
+  intent?: { score: number };
+  createdAt: string;
 }
 
-interface MonitoringAlert {
-  id: string;
-  platform: 'linkedin' | 'reddit' | 'twitter';
+interface PipelineData {
+  statusBreakdown: { status: string; count: number; link: string }[];
+  qualificationBreakdown: { qualification: string; count: number; link: string }[];
+  sourceBreakdown: { source: string; count: number; link: string }[];
+}
+
+interface ActivityItem {
+  type: 'scan' | 'email' | 'lead_update';
   message: string;
-  time: string;
   timestamp: string;
+  link: string;
+}
+
+interface NicheSummary {
+  _id: string;
+  name: string;
+  keywords: string[];
+  location: string;
+  sources: string[];
+  stats: {
+    totalLeads: number;
+    hotLeads: number;
+    totalScans: number;
+  };
+  lastScanAt: string | null;
+  createdAt: string;
 }
 
 const DashboardPage = () => {
   const { user } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const [kpi] = useState<KpiStats>({
-    qualifiedLeads: 36782,
-    conversionRate: 18.6,
-    highIntentLeads: 7532,
-    qualifiedChange: 12.5,
-    conversionChange: 4.3,
-    intentChange: 8.2,
-  });
+  // Data states
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [pipeline, setPipeline] = useState<PipelineData | null>(null);
+  const [activities, setActivities] = useState<ActivityItem[]>([]);
+  const [niches, setNiches] = useState<NicheSummary[]>([]);
+  const [selectedNiche, setSelectedNiche] = useState<string | null>(null);
 
-  const [quality] = useState<QualityDistribution>({
-    high: { percentage: 28.5, count: 10467 },
-    medium: { percentage: 50.1, count: 18430 },
-    low: { percentage: 21.4, count: 7885 },
-  });
+  // UI states
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
 
-  const [alerts] = useState<MonitoringAlert[]>([
-    {
-      id: '1',
-      platform: 'linkedin',
-      message: 'Potential 828 Lead Found',
-      time: 'Just now',
-      timestamp: new Date().toISOString(),
-    },
-    {
-      id: '2',
-      platform: 'reddit',
-      message: 'High Intent Keyword Detected',
-      time: '2m ago',
-      timestamp: new Date(Date.now() - 2 * 60000).toISOString(),
-    },
-    {
-      id: '3',
-      platform: 'twitter',
-      message: 'Lead Opportunity Found',
-      time: '3m ago',
-      timestamp: new Date(Date.now() - 3 * 60000).toISOString(),
-    },
-  ]);
+  // ─── Fetch Dashboard Data ──────────────────────────
+
+  const fetchDashboardData = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const nicheParam = selectedNiche ? `?nicheId=${selectedNiche}` : '';
+
+      const [statsRes, pipelineRes, activityRes, nichesRes] = await Promise.all([
+        api.get(`${API_ENDPOINTS.DASHBOARD.STATS}${nicheParam}&expand=true`),
+        api.get(`${API_ENDPOINTS.DASHBOARD.PIPELINE}${nicheParam}`),
+        api.get(`${API_ENDPOINTS.DASHBOARD.ACTIVITY}?limit=8`),
+        api.get(API_ENDPOINTS.DASHBOARD.NICHES),
+      ]);
+
+      setStats(statsRes.data);
+      setPipeline(pipelineRes.data);
+      setActivities(activityRes.data.activities || []);
+      setNiches(nichesRes.data.niches || []);
+    } catch (err: any) {
+      setError('Failed to load dashboard data. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedNiche]);
+
+  useEffect(() => {
+    fetchDashboardData();
+  }, [fetchDashboardData]);
 
   // ─── Sidebar Nav ────────────────────────────────────
+
   const navItems = [
     { icon: FiHome, label: 'Dashboard', path: '/dashboard', active: true },
     { icon: FiUsers, label: 'Leads', path: '/leads' },
@@ -107,6 +167,7 @@ const DashboardPage = () => {
   ];
 
   // ─── Helpers ────────────────────────────────────────
+
   const getPlatformIcon = (platform: string) => {
     switch (platform) {
       case 'linkedin':
@@ -120,118 +181,36 @@ const DashboardPage = () => {
     }
   };
 
-  const getPlatformLabel = (platform: string) => {
-    switch (platform) {
-      case 'linkedin':
-        return 'LinkedIn Post';
-      case 'reddit':
-        return 'Reddit Discussion';
-      case 'twitter':
-        return 'X (Twitter) Mention';
+  const getActivityIcon = (type: string) => {
+    switch (type) {
+      case 'scan':
+        return <FiTarget className="w-4 h-4 text-[#2563EB]" />;
+      case 'email':
+        return <FiMail className="w-4 h-4 text-[#06B6D4]" />;
+      case 'lead_update':
+        return <FiCheckCircle className="w-4 h-4 text-[#22C55E]" />;
       default:
-        return platform;
+        return <FiActivity className="w-4 h-4 text-[#6B7280]" />;
     }
   };
 
-  // ─── Donut Chart Component ──────────────────────────
-  const DonutChart = () => {
-    const total = quality.high.count + quality.medium.count + quality.low.count;
-    const highAngle = (quality.high.count / total) * 360;
-    const mediumAngle = (quality.medium.count / total) * 360;
-    const lowAngle = 360 - highAngle - mediumAngle;
-
-    return (
-      <div className="flex items-center gap-6 sm:gap-8">
-        {/* SVG Donut */}
-        <div className="relative w-28 h-28 sm:w-36 sm:h-36 flex-shrink-0">
-          <svg viewBox="0 0 36 36" className="w-full h-full -rotate-90">
-            <circle
-              cx="18"
-              cy="18"
-              r="15.9"
-              fill="none"
-              stroke="#2563EB"
-              strokeWidth="4"
-              strokeDasharray={`${(highAngle / 360) * 100} ${100 - (highAngle / 360) * 100}`}
-              strokeDashoffset="0"
-              className="transition-all duration-700"
-            />
-            <circle
-              cx="18"
-              cy="18"
-              r="15.9"
-              fill="none"
-              stroke="#06B6D4"
-              strokeWidth="4"
-              strokeDasharray={`${(mediumAngle / 360) * 100} ${100 - (mediumAngle / 360) * 100}`}
-              strokeDashoffset={`${-(highAngle / 360) * 100}`}
-              className="transition-all duration-700"
-            />
-            <circle
-              cx="18"
-              cy="18"
-              r="15.9"
-              fill="none"
-              stroke="#9CA3AF"
-              strokeWidth="4"
-              strokeDasharray={`${(lowAngle / 360) * 100} ${100 - (lowAngle / 360) * 100}`}
-              strokeDashoffset={`${-((highAngle + mediumAngle) / 360) * 100}`}
-              className="transition-all duration-700"
-            />
-          </svg>
-          <div className="absolute inset-0 flex items-center justify-center">
-            <span className="text-base sm:text-lg font-bold text-[#111827]">
-              {kpi.qualifiedLeads.toLocaleString()}
-            </span>
-          </div>
-        </div>
-
-        {/* Legend */}
-        <div className="space-y-3 flex-1">
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-[#2563EB] flex-shrink-0" />
-            <span className="text-xs sm:text-sm text-[#374151]">High Quality</span>
-            <span className="text-xs sm:text-sm font-semibold text-[#111827] ml-auto">
-              {quality.high.percentage}%
-            </span>
-            <span className="text-[10px] sm:text-xs text-[#9CA3AF]">
-              ({quality.high.count.toLocaleString()})
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-[#06B6D4] flex-shrink-0" />
-            <span className="text-xs sm:text-sm text-[#374151]">Medium Quality</span>
-            <span className="text-xs sm:text-sm font-semibold text-[#111827] ml-auto">
-              {quality.medium.percentage}%
-            </span>
-            <span className="text-[10px] sm:text-xs text-[#9CA3AF]">
-              ({quality.medium.count.toLocaleString()})
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-[#9CA3AF] flex-shrink-0" />
-            <span className="text-xs sm:text-sm text-[#374151]">Low Quality</span>
-            <span className="text-xs sm:text-sm font-semibold text-[#111827] ml-auto">
-              {quality.low.percentage}%
-            </span>
-            <span className="text-[10px] sm:text-xs text-[#9CA3AF]">
-              ({quality.low.count.toLocaleString()})
-            </span>
-          </div>
-        </div>
-      </div>
-    );
+  const getTimeAgo = (timestamp: string) => {
+    const diff = Date.now() - new Date(timestamp).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.floor(hours / 24)}d ago`;
   };
 
   // ─── Main Render ────────────────────────────────────
+
   return (
     <div className="min-h-screen bg-[#F9FAFB] flex">
       {/* Mobile Sidebar Overlay */}
       {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black/40 z-40 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        />
+        <div className="fixed inset-0 bg-black/40 z-40 lg:hidden" onClick={() => setSidebarOpen(false)} />
       )}
 
       {/* Sidebar */}
@@ -242,33 +221,25 @@ const DashboardPage = () => {
           ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
         `}
       >
-        {/* Sidebar Header */}
         <div className="flex items-center gap-2.5 px-5 py-5 border-b border-[#E5E7EB]">
           <div className="w-8 h-8 bg-gradient-to-br from-[#2563EB] to-[#4F46E5] rounded-lg flex items-center justify-center flex-shrink-0">
             <img src={AutoleadsAiLogo} alt="Logo" className="w-5 h-5" />
           </div>
           <h1 className="text-sm font-bold text-[#111827] leading-tight">AUTOLEDS AI</h1>
-          <button
-            onClick={() => setSidebarOpen(false)}
-            className="lg:hidden ml-auto text-[#9CA3AF] hover:text-[#111827]"
-          >
+          <button onClick={() => setSidebarOpen(false)} className="lg:hidden ml-auto text-[#9CA3AF] hover:text-[#111827]">
             <FiX className="w-5 h-5" />
           </button>
         </div>
-
-        {/* Nav Links */}
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {navItems.map((item) => (
             <Link
               key={item.label}
               to={item.path}
-              className={`
-                flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all
-                ${item.active
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                item.active
                   ? 'bg-[#EFF6FF] text-[#2563EB]'
                   : 'text-[#6B7280] hover:bg-[#F3F4F6] hover:text-[#111827]'
-                }
-              `}
+              }`}
             >
               <item.icon className={`w-4 h-4 ${item.active ? 'text-[#2563EB]' : ''}`} />
               {item.label}
@@ -283,81 +254,100 @@ const DashboardPage = () => {
         <header className="sticky top-0 z-30 bg-white border-b border-[#E5E7EB] px-4 sm:px-6">
           <div className="flex items-center justify-between h-14 sm:h-16">
             <div className="flex items-center gap-3 flex-1">
-              <button
-                onClick={() => setSidebarOpen(true)}
-                className="lg:hidden text-[#6B7280] hover:text-[#111827] transition-colors"
-              >
+              <button onClick={() => setSidebarOpen(true)} className="lg:hidden text-[#6B7280] hover:text-[#111827] transition-colors">
                 <FiMenu className="w-5 h-5" />
               </button>
-              <div className="relative flex-1 max-w-md hidden sm:block">
-                <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#9CA3AF]" />
-                <input
-                  type="text"
-                  placeholder="Search leads, companies, emails..."
-                  className="w-full pl-10 pr-4 py-2 bg-[#F9FAFB] border border-[#E5E7EB] rounded-xl text-sm text-[#111827] placeholder-[#9CA3AF] focus:outline-none focus:ring-2 focus:ring-[#2563EB] focus:border-transparent"
-                />
-              </div>
+              <SearchBar
+                value={searchQuery}
+                onChange={setSearchQuery}
+                placeholder="Search leads, companies, emails..."
+                className="hidden sm:block max-w-md"
+              />
             </div>
-
             <div className="flex items-center gap-3">
               <button className="relative p-2 text-[#6B7280] hover:text-[#2563EB] hover:bg-[#EFF6FF] rounded-xl transition-colors">
                 <FiBell className="w-5 h-5" />
                 <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-[#EF4444] rounded-full ring-2 ring-white" />
               </button>
-              <div className="w-8 h-8 bg-gradient-to-br from-[#2563EB] to-[#4F46E5] rounded-xl flex items-center justify-center text-white text-xs font-bold">
-                {user?.firstName?.[0]}{user?.lastName?.[0]}
-              </div>
+              <Avatar name={`${user?.firstName} ${user?.lastName}`} size="md" />
             </div>
           </div>
         </header>
 
         {/* Dashboard Body */}
         <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto w-full space-y-6">
-          {/* KPI Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5">
-            <div className="bg-white rounded-2xl border border-[#E5E7EB] p-4 sm:p-5 hover:shadow-md transition-shadow">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-xs sm:text-sm text-[#6B7280] font-medium">Qualified Leads</span>
-                <FiMoreHorizontal className="w-4 h-4 text-[#9CA3AF]" />
-              </div>
-              <div className="text-2xl sm:text-3xl font-bold text-[#111827]">
-                {kpi.qualifiedLeads.toLocaleString()}
-              </div>
-              <div className="flex items-center gap-1 mt-1.5">
-                <FiArrowUp className="w-3.5 h-3.5 text-[#22C55E]" />
-                <span className="text-xs font-medium text-[#22C55E]">{kpi.qualifiedChange}%</span>
-                <span className="text-xs text-[#9CA3AF]">vs last 7 days</span>
-              </div>
+          {/* Error State */}
+          {error && (
+            <div className="p-4 bg-[#FEE2E2] border border-[#EF4444]/20 rounded-xl flex items-center gap-3 text-[#EF4444] text-sm animate-scale-in">
+              <FiAlertCircle className="w-5 h-5 flex-shrink-0" />
+              <span>{error}</span>
+              <button onClick={fetchDashboardData} className="ml-auto flex items-center gap-1.5 text-[#2563EB] hover:underline font-medium">
+                <FiRefreshCw className="w-4 h-4" /> Retry
+              </button>
             </div>
+          )}
 
-            <div className="bg-white rounded-2xl border border-[#E5E7EB] p-4 sm:p-5 hover:shadow-md transition-shadow">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-xs sm:text-sm text-[#6B7280] font-medium">Conversion Rate</span>
-                <FiMoreHorizontal className="w-4 h-4 text-[#9CA3AF]" />
-              </div>
-              <div className="text-2xl sm:text-3xl font-bold text-[#111827]">{kpi.conversionRate}%</div>
-              <div className="flex items-center gap-1 mt-1.5">
-                <FiArrowUp className="w-3.5 h-3.5 text-[#22C55E]" />
-                <span className="text-xs font-medium text-[#22C55E]">{kpi.conversionChange}%</span>
-                <span className="text-xs text-[#9CA3AF]">vs last 7 days</span>
+          {/* Niche Selector */}
+          {niches.length > 0 && (
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="text-sm text-[#6B7280] font-medium">Showing data for:</span>
+              <div className="flex gap-2 flex-wrap">
+                <button
+                  onClick={() => setSelectedNiche(null)}
+                  className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+                    !selectedNiche ? 'bg-[#2563EB] text-white shadow-md' : 'bg-white text-[#6B7280] border border-[#E5E7EB] hover:border-[#2563EB]/30'
+                  }`}
+                >
+                  All Niches
+                </button>
+                {niches.map((niche) => (
+                  <button
+                    key={niche._id}
+                    onClick={() => setSelectedNiche(niche._id)}
+                    className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-medium transition-all ${
+                      selectedNiche === niche._id ? 'bg-[#2563EB] text-white shadow-md' : 'bg-white text-[#6B7280] border border-[#E5E7EB] hover:border-[#2563EB]/30'
+                    }`}
+                  >
+                    {sanitizeString(niche.name)}
+                  </button>
+                ))}
               </div>
             </div>
+          )}
 
-            <div className="bg-white rounded-2xl border border-[#E5E7EB] p-4 sm:p-5 hover:shadow-md transition-shadow">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-xs sm:text-sm text-[#6B7280] font-medium">High Intent Leads</span>
-                <FiMoreHorizontal className="w-4 h-4 text-[#9CA3AF]" />
-              </div>
-              <div className="text-2xl sm:text-3xl font-bold text-[#111827]">
-                {kpi.highIntentLeads.toLocaleString()}
-              </div>
-              <div className="flex items-center gap-1 mt-1.5">
-                <FiArrowUp className="w-3.5 h-3.5 text-[#22C55E]" />
-                <span className="text-xs font-medium text-[#22C55E]">{kpi.intentChange}%</span>
-                <span className="text-xs text-[#9CA3AF]">vs last 7 days</span>
-              </div>
+          {/* KPI Cards — Shimmer when loading */}
+          {loading ? (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5">
+              {[1, 2, 3].map((i) => <SkeletonStatCard key={i} />)}
             </div>
-          </div>
+          ) : stats ? (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-5">
+              <StatCard
+                label="Qualified Leads"
+                value={stats.leads.total.count.toLocaleString()}
+                icon={<FiUsers className="w-4 h-4 sm:w-5 sm:h-5 text-[#2563EB]" />}
+                link={stats.leads.total.link}
+                trend="up"
+                trendValue={`${stats.leads.conversionRate}%`}
+                subtitle="vs last 7 days"
+              />
+              <StatCard
+                label="Hot Leads"
+                value={stats.leads.hot.count.toLocaleString()}
+                icon={<FiTarget className="w-4 h-4 sm:w-5 sm:h-5 text-[#EF4444]" />}
+                link={stats.leads.hot.link}
+                trend="up"
+                subtitle="vs last 7 days"
+              />
+              <StatCard
+                label="Open Rate"
+                value={`${stats.emails.openRate}%`}
+                icon={<FiMail className="w-4 h-4 sm:w-5 sm:h-5 text-[#06B6D4]" />}
+                link={stats.emails.opened.link}
+                subtitle={`${stats.emails.sent.count} emails sent`}
+              />
+            </div>
+          ) : null}
 
           {/* Scanning Banner */}
           <div className="bg-gradient-to-r from-[#EFF6FF] to-[#EEF2FF] border border-[#2563EB]/10 rounded-2xl p-3 sm:p-4 flex items-center gap-3">
@@ -370,107 +360,136 @@ const DashboardPage = () => {
           </div>
 
           {/* Middle Row */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-            {/* Lead Quality Distribution */}
-            <div className="bg-white rounded-2xl border border-[#E5E7EB] p-4 sm:p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-base sm:text-lg font-bold text-[#111827]">High Quality Distribution</h3>
-                <FiMoreHorizontal className="w-4 h-4 text-[#9CA3AF]" />
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+            {/* Pipeline Chart — Shimmer when loading */}
+            {loading ? (
+              <div className="lg:col-span-2"><SkeletonChart /></div>
+            ) : pipeline ? (
+              <div className="lg:col-span-2 bg-white rounded-2xl border border-[#E5E7EB] p-4 sm:p-6">
+                <h3 className="text-base sm:text-lg font-bold text-[#111827] mb-4">Lead Pipeline</h3>
+                <div className="space-y-3">
+                  {pipeline.statusBreakdown.map((item, i) => {
+                    const maxCount = Math.max(...pipeline.statusBreakdown.map((s) => s.count), 1);
+                    const width = (item.count / maxCount) * 100;
+                    const colors = ['bg-[#9CA3AF]', 'bg-[#06B6D4]', 'bg-[#2563EB]', 'bg-[#4F46E5]', 'bg-[#22C55E]'];
+                    return (
+                      <Link key={item.status} to={item.link} className="flex items-center gap-3 group">
+                        <span className="text-xs sm:text-sm text-[#374151] w-20 sm:w-24 flex-shrink-0 capitalize">
+                          {item.status.replace(/_/g, ' ')}
+                        </span>
+                        <div className="flex-1 bg-[#F3F4F6] rounded-full h-5 sm:h-6 overflow-hidden">
+                          <div
+                            className={`h-full ${colors[i]} rounded-full transition-all duration-500 group-hover:opacity-80 flex items-center justify-end pr-2`}
+                            style={{ width: `${width}%` }}
+                          >
+                            <span className="text-[10px] sm:text-xs text-white font-medium">{item.count}</span>
+                          </div>
+                        </div>
+                      </Link>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="flex items-baseline gap-2 mb-4 sm:mb-6">
-                <span className="text-2xl sm:text-3xl font-bold text-[#111827]">36,782</span>
-                <span className="text-xs text-[#9CA3AF]">vs last 7 days</span>
-              </div>
-              <DonutChart />
-            </div>
+            ) : null}
 
-            {/* Real-Time Monitoring */}
+            {/* Activity Feed */}
             <div className="bg-white rounded-2xl border border-[#E5E7EB] p-4 sm:p-6">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-base sm:text-lg font-bold text-[#111827]">Real-Time Monitoring</h3>
-                <span className="px-2.5 py-0.5 bg-[#EFF6FF] text-[#2563EB] rounded-full text-xs font-bold">
-                  {alerts.length}
-                </span>
+                <h3 className="text-base sm:text-lg font-bold text-[#111827]">Recent Activity</h3>
+                <FiActivity className="w-4 h-4 text-[#6B7280]" />
               </div>
-              <div className="space-y-3 sm:space-y-4">
-                {alerts.map((alert) => (
-                  <div
-                    key={alert.id}
-                    className="flex items-start gap-3 p-3 rounded-xl bg-[#F9FAFB] hover:bg-[#F3F4F6] transition-colors cursor-pointer"
-                  >
-                    <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm border border-[#E5E7EB]">
-                      {getPlatformIcon(alert.platform)}
+              {loading ? (
+                <div className="space-y-3">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={i} className="flex items-start gap-3">
+                      <div className="w-8 h-8 rounded-xl bg-[#F3F4F6] animate-shimmer relative overflow-hidden">
+                        <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/50 to-transparent" />
+                      </div>
+                      <div className="flex-1 space-y-1.5">
+                        <div className="h-3 bg-[#F3F4F6] rounded animate-shimmer relative overflow-hidden w-3/4">
+                          <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/50 to-transparent" />
+                        </div>
+                        <div className="h-2 bg-[#F3F4F6] rounded animate-shimmer relative overflow-hidden w-1/4">
+                          <div className="absolute inset-0 -translate-x-full animate-shimmer bg-gradient-to-r from-transparent via-white/50 to-transparent" />
+                        </div>
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs text-[#9CA3AF]">{getPlatformLabel(alert.platform)}</p>
-                      <p className="text-sm font-medium text-[#111827] truncate">{alert.message}</p>
-                    </div>
-                    <span className="text-[10px] sm:text-xs text-[#9CA3AF] flex-shrink-0">{alert.time}</span>
-                  </div>
-                ))}
-              </div>
-              <Link
-                to="/conversations"
-                className="inline-flex items-center gap-1 text-xs sm:text-sm text-[#2563EB] hover:underline font-medium mt-4"
-              >
-                View All Alerts
-                <FiExternalLink className="w-3 h-3" />
-              </Link>
+                  ))}
+                </div>
+              ) : activities.length > 0 ? (
+                <div className="space-y-4">
+                  {activities.map((activity, index) => (
+                    <Link key={index} to={activity.link} className="flex items-start gap-3 group hover:bg-[#F9FAFB] rounded-xl p-2 -mx-2 transition-colors">
+                      <div className="w-8 h-8 bg-[#F3F4F6] rounded-xl flex items-center justify-center flex-shrink-0">
+                        {getActivityIcon(activity.type)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs sm:text-sm text-[#374151] truncate">{sanitizeString(activity.message)}</p>
+                        <p className="text-[10px] sm:text-xs text-[#9CA3AF] mt-0.5">{getTimeAgo(activity.timestamp)}</p>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-[#9CA3AF] text-center py-8">No recent activity</p>
+              )}
             </div>
           </div>
 
-          {/* Bottom Row */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-            {/* Channel Performance */}
+          {/* Bottom Row — Hot Leads Preview */}
+          {!loading && stats?.samples?.hotLeads && stats.samples.hotLeads.length > 0 && (
             <div className="bg-white rounded-2xl border border-[#E5E7EB] p-4 sm:p-6">
-              <h3 className="text-base sm:text-lg font-bold text-[#111827] mb-4">Channel Performance</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-[#F9FAFB] rounded-xl p-4 text-center">
-                  <div className="w-8 h-8 bg-[#EFF6FF] rounded-lg flex items-center justify-center mx-auto mb-2">
-                    <FiArrowUp className="w-4 h-4 text-[#2563EB]" />
-                  </div>
-                  <p className="text-xs text-[#6B7280] mb-1">Inbound</p>
-                  <p className="text-xl sm:text-2xl font-bold text-[#111827]">2,451</p>
-                  <p className="text-xs text-[#9CA3AF] mt-1">Conversation Rate</p>
-                  <p className="text-sm font-semibold text-[#22C55E]">12.8%</p>
-                </div>
-                <div className="bg-[#F9FAFB] rounded-xl p-4 text-center">
-                  <div className="w-8 h-8 bg-[#EEF2FF] rounded-lg flex items-center justify-center mx-auto mb-2">
-                    <FiTarget className="w-4 h-4 text-[#4F46E5]" />
-                  </div>
-                  <p className="text-xs text-[#6B7280] mb-1">Outbound</p>
-                  <p className="text-xl sm:text-2xl font-bold text-[#111827]">5,128</p>
-                  <p className="text-xs text-[#9CA3AF] mt-1">Conversation Rate</p>
-                  <p className="text-sm font-semibold text-[#22C55E]">8.4%</p>
-                </div>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-base sm:text-lg font-bold text-[#111827]">🔥 Hot Leads This Week</h3>
+                <Link to="/leads?qualification=hot" className="text-xs sm:text-sm text-[#2563EB] hover:underline font-medium">
+                  View All Hot Leads
+                </Link>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="text-left text-xs text-[#9CA3AF] border-b border-[#E5E7EB]">
+                      <th className="pb-3 font-medium">Name</th>
+                      <th className="pb-3 font-medium hidden sm:table-cell">Company</th>
+                      <th className="pb-3 font-medium hidden md:table-cell">Source</th>
+                      <th className="pb-3 font-medium">Score</th>
+                      <th className="pb-3 font-medium hidden lg:table-cell">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stats.samples.hotLeads.slice(0, 5).map((lead) => (
+                      <tr key={lead._id} className="border-b border-[#F3F4F6] hover:bg-[#F9FAFB] transition-colors">
+                        <td className="py-3">
+                          <Link to={`/leads/${lead._id}`} className="text-sm font-medium text-[#111827] hover:text-[#2563EB]">
+                            {sanitizeString(lead.name || 'Unknown')}
+                          </Link>
+                        </td>
+                        <td className="py-3 text-sm text-[#6B7280] hidden sm:table-cell">{sanitizeString(lead.company || '-')}</td>
+                        <td className="py-3 hidden md:table-cell">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-[#EFF6FF] text-[#2563EB] rounded-lg text-xs font-medium">
+                            {sanitizeString(lead.source)}
+                          </span>
+                        </td>
+                        <td className="py-3">
+                          <div className="flex items-center gap-2">
+                            <div className="w-12 sm:w-16 bg-[#F3F4F6] rounded-full h-1.5">
+                              <div className="h-full bg-[#22C55E] rounded-full" style={{ width: `${lead.intent?.score || 0}%` }} />
+                            </div>
+                            <span className="text-xs text-[#6B7280]">{lead.intent?.score || 0}</span>
+                          </div>
+                        </td>
+                        <td className="py-3 hidden lg:table-cell">
+                          <span className="px-2 py-0.5 bg-[#DCFCE7] text-[#22C55E] rounded-lg text-xs font-medium capitalize">
+                            {lead.status}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
-
-            {/* Conversion Rate Detail */}
-            <div className="bg-white rounded-2xl border border-[#E5E7EB] p-4 sm:p-6">
-              <h3 className="text-base sm:text-lg font-bold text-[#111827] mb-4">Conversion Rate</h3>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-[#F9FAFB] rounded-xl p-4 text-center">
-                  <div className="w-8 h-8 bg-[#DCFCE7] rounded-lg flex items-center justify-center mx-auto mb-2">
-                    <FiMessageCircle className="w-4 h-4 text-[#22C55E]" />
-                  </div>
-                  <p className="text-xs text-[#6B7280] mb-1">Email Outreach</p>
-                  <p className="text-xl sm:text-2xl font-bold text-[#111827]">24.3%</p>
-                  <p className="text-xs text-[#9CA3AF] mt-1">vs last 7 days</p>
-                  <p className="text-sm font-semibold text-[#22C55E]">+5.1%</p>
-                </div>
-                <div className="bg-[#F9FAFB] rounded-xl p-4 text-center">
-                  <div className="w-8 h-8 bg-[#FEF3C7] rounded-lg flex items-center justify-center mx-auto mb-2">
-                    <FiGlobe className="w-4 h-4 text-[#F59E0B]" />
-                  </div>
-                  <p className="text-xs text-[#6B7280] mb-1">Social Media</p>
-                  <p className="text-xl sm:text-2xl font-bold text-[#111827]">15.7%</p>
-                  <p className="text-xs text-[#9CA3AF] mt-1">vs last 7 days</p>
-                  <p className="text-sm font-semibold text-[#22C55E]">+2.3%</p>
-                </div>
-              </div>
-            </div>
-          </div>
+          )}
         </main>
       </div>
     </div>
