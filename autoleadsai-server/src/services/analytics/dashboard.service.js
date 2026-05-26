@@ -1,24 +1,11 @@
 import { Lead, Scan, EmailLog } from '../../models/index.js';
-import { getRedisClient } from '../../config/redis.js';
 import { logger } from '../../utils/logger.js';
-
-const CACHE_TTL = 300;
-
-const getCachedOrFetch = async (key, fetchFn) => {
-  const redis = getRedisClient();
-  const cached = await redis.get(key);
-  if (cached) return JSON.parse(cached);
-  const data = await fetchFn();
-  await redis.set(key, JSON.stringify(data), 'EX', CACHE_TTL);
-  return data;
-};
-
-const invalidateUserCache = async (userId) => {
-  const redis = getRedisClient();
-  const pattern = `dashboard:${userId}:*`;
-  const keys = await redis.keys(pattern);
-  if (keys.length > 0) await redis.del(keys);
-};
+import {
+  getCachedOrFetch,
+  deleteCachePattern,
+  cacheKeys,
+  DEFAULT_TTL,
+} from '../cache/cache.service.js';
 
 // ─── Helper: build match filter with optional nicheId ──
 
@@ -31,10 +18,9 @@ const buildFilter = (userId, nicheId = null, extra = {}) => {
 // ─── Dashboard Stats (with drill‑down links) ────────
 
 export const getDashboardStats = async (userId, nicheId = null, expand = false) => {
-  const nicheSuffix = nicheId ? `:niche:${nicheId}` : '';
-  const cacheKey = `dashboard:${userId}:stats${nicheSuffix}${expand ? ':expand' : ''}`;
+  const key = cacheKeys.dashboardStats(userId, nicheId) + (expand ? ':expand' : '');
 
-  return getCachedOrFetch(cacheKey, async () => {
+  return getCachedOrFetch(key, async () => {
     const now = new Date();
     const weekAgo = new Date(now - 7 * 24 * 60 * 60 * 1000);
     const monthAgo = new Date(now - 30 * 24 * 60 * 60 * 1000);
@@ -109,15 +95,15 @@ export const getDashboardStats = async (userId, nicheId = null, expand = false) 
       const [hotSample, newSample, convertedSample] = await Promise.all([
         Lead.find(buildFilter(userId, nicheId, { qualification: 'hot' }))
           .sort({ createdAt: -1 }).limit(5)
-          .select('name email company source sourceUrl qualification status nicheId createdAt')
+          .select('name email company source sourceUrl linkPreview qualification status nicheId createdAt')
           .lean(),
         Lead.find(weekFilter)
           .sort({ createdAt: -1 }).limit(5)
-          .select('name email company source sourceUrl qualification status nicheId createdAt')
+          .select('name email company source sourceUrl linkPreview qualification status nicheId createdAt')
           .lean(),
         Lead.find(buildFilter(userId, nicheId, { status: 'converted' }))
           .sort({ updatedAt: -1 }).limit(5)
-          .select('name email company source sourceUrl qualification status nicheId createdAt')
+          .select('name email company source sourceUrl linkPreview qualification status nicheId createdAt')
           .lean(),
       ]);
 
@@ -129,23 +115,16 @@ export const getDashboardStats = async (userId, nicheId = null, expand = false) 
     }
 
     return stats;
-  });
+  }, DEFAULT_TTL.DASHBOARD);
 };
 
 // ─── Pipeline Data ──────────────────────────────────
 
 export const getPipelineData = async (userId, nicheId = null) => {
-  const nicheSuffix = nicheId ? `:niche:${nicheId}` : '';
-  const cacheKey = `dashboard:${userId}:pipeline${nicheSuffix}`;
+  const key = cacheKeys.dashboardPipeline(userId, nicheId);
 
-  return getCachedOrFetch(cacheKey, async () => {
+  return getCachedOrFetch(key, async () => {
     const baseFilter = buildFilter(userId, nicheId);
-
-    const buildLink = (key, value) => {
-      let link = `/leads?${key}=${value}`;
-      if (nicheId) link += `&nicheId=${nicheId}`;
-      return link;
-    };
 
     const [statusBreakdown, qualificationBreakdown, sourceBreakdown] = await Promise.all([
       Lead.aggregate([
@@ -168,7 +147,7 @@ export const getPipelineData = async (userId, nicheId = null) => {
     ]);
 
     return { statusBreakdown, qualificationBreakdown, sourceBreakdown };
-  });
+  }, DEFAULT_TTL.PIPELINE);
 };
 
 // ─── Recent Leads (always returns full objects) ─────
@@ -179,7 +158,7 @@ export const getRecentLeads = async (userId, nicheId = null, limit = 10) => {
   return Lead.find(filter)
     .sort({ createdAt: -1 })
     .limit(limit)
-    .select('name email company source sourceUrl qualification status nicheId createdAt')
+    .select('name email company source sourceUrl linkPreview qualification status nicheId createdAt')
     .lean();
 };
 
@@ -199,7 +178,6 @@ export const getActivityFeed = async (userId, nicheId = null, limit = 20) => {
       .select('name email status qualification nicheId updatedAt').lean(),
   ]);
 
-  // Filter email logs by nicheId if provided (since EmailLog doesn't have nicheId directly)
   const filteredEmails = nicheId
     ? recentEmails.filter((e) => e.leadId?.nicheId?.toString() === nicheId)
     : recentEmails;
@@ -241,7 +219,6 @@ export const getActivityFeed = async (userId, nicheId = null, limit = 20) => {
 export const getEmailPerformance = async (userId, nicheId = null, days = 30) => {
   const sinceDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
-  // If nicheId provided, get lead IDs for that niche to filter emails
   let leadIdFilter = {};
   if (nicheId) {
     const nicheLeadIds = await Lead.find({ userId, nicheId }).select('_id').lean();
@@ -321,9 +298,7 @@ export const getScanPerformance = async (userId, nicheId = null, days = 30) => {
           source: '$_id',
           count: 1,
           avgLeads: { $round: ['$avgLeads', 1] },
-          link: {
-            $concat: ['/scans?source=', '$_id', nicheId ? `&nicheId=${nicheId}` : ''],
-          },
+          link: { $concat: ['/scans?source=', '$_id', nicheId ? `&nicheId=${nicheId}` : ''] },
           _id: 0,
         },
       },
@@ -382,7 +357,6 @@ export const getScanPerformance = async (userId, nicheId = null, days = 30) => {
 
 export const getSourceAnalytics = async (userId, nicheId = null, days = 30, expand = false) => {
   const sinceDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-
   const baseFilter = buildFilter(userId, nicheId, { createdAt: { $gte: sinceDate } });
 
   const buildSourceLink = (source, extra = '') => {
@@ -425,7 +399,6 @@ export const getSourceAnalytics = async (userId, nicheId = null, days = 30, expa
     { $sort: { total: -1 } },
   ]);
 
-  // Attach proper links (can't use $concat with variables from previous stage in all MongoDB versions)
   for (const item of breakdown) {
     item.link = buildSourceLink(item.source);
     item.hotLink = buildSourceLink(item.source, 'qualification=hot');
@@ -435,7 +408,7 @@ export const getSourceAnalytics = async (userId, nicheId = null, days = 30, expa
   if (expand) {
     for (const source of breakdown) {
       source.samples = await Lead.find({ _id: { $in: source.sampleIds } })
-        .select('name email company source sourceUrl qualification status nicheId createdAt')
+        .select('name email company source sourceUrl linkPreview qualification status nicheId createdAt')
         .lean();
       source.samples = source.samples.map((l) => ({ ...l, link: `/leads/${l._id}` }));
     }
@@ -444,4 +417,11 @@ export const getSourceAnalytics = async (userId, nicheId = null, days = 30, expa
   return breakdown;
 };
 
-export { invalidateUserCache };
+// ─── Cache Invalidation ─────────────────────────────
+
+export const invalidateDashboardCache = async (userId) => {
+  await deleteCachePattern(`dashboard:${userId}:*`);
+  logger.info(`Dashboard cache invalidated for user: ${userId}`);
+};
+
+export { invalidateDashboardCache as invalidateUserCache };

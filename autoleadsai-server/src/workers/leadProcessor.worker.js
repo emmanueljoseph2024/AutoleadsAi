@@ -25,10 +25,21 @@ const leadProcessor = new Worker(
         // Trigger n8n AI scoring workflow
         await executeLeadScoring(leadId);
 
-        // Mark lead as scored (n8n webhook will update the actual scores)
-        await Lead.findByIdAndUpdate(leadId, { status: 'scored' });
+        // Fetch updated lead to get score and userId
+        const updatedLead = await Lead.findById(leadId).select('userId intent relevance qualification status').lean();
 
-        eventBus.emitEvent(EVENT_TYPES.LEAD_SCORED, { leadId });
+        if (updatedLead) {
+          // Emit real-time scoring event with user context
+          eventBus.emitEvent(EVENT_TYPES.LEAD_SCORED, {
+            leadId,
+            userId: updatedLead.userId,
+            intentScore: updatedLead.intent?.score || 0,
+            relevanceScore: updatedLead.relevance?.score || 0,
+            qualification: updatedLead.qualification,
+            status: updatedLead.status,
+          });
+        }
+
         break;
       }
 
@@ -38,6 +49,16 @@ const leadProcessor = new Worker(
         logger.info(`Enriching lead: ${leadId}`);
 
         await executeLeadInsights(leadId);
+
+        // Emit enrichment complete
+        const enrichedLead = await Lead.findById(leadId).select('userId').lean();
+        if (enrichedLead) {
+          eventBus.emitEvent(EVENT_TYPES.LEAD_ENRICHED, {
+            leadId,
+            userId: enrichedLead.userId,
+          });
+        }
+
         break;
       }
 
@@ -45,6 +66,8 @@ const leadProcessor = new Worker(
       case 'dedup_leads': {
         const { leads } = data;
         logger.info(`Deduplicating ${leads.length} leads`);
+
+        let disqualifiedCount = 0;
 
         for (const lead of leads) {
           const duplicates = await Lead.find({
@@ -55,8 +78,20 @@ const leadProcessor = new Worker(
 
           if (duplicates.length > 0) {
             await Lead.findByIdAndUpdate(lead._id, { status: 'disqualified' });
+            disqualifiedCount++;
           }
         }
+
+        // Emit dedup result
+        if (leads.length > 0) {
+          eventBus.emitEvent(EVENT_TYPES.LEAD_DISQUALIFIED, {
+            userId: leads[0].userId,
+            totalProcessed: leads.length,
+            disqualified: disqualifiedCount,
+            kept: leads.length - disqualifiedCount,
+          });
+        }
+
         break;
       }
 
@@ -66,7 +101,16 @@ const leadProcessor = new Worker(
         logger.info(`Executing workflow for lead ${leadId}: ${eventType}`);
 
         if (eventType === 'lead.qualified.hot') {
-          eventBus.emitEvent(EVENT_TYPES.LEAD_QUALIFIED_HOT, { leadId });
+          const lead = await Lead.findById(leadId).select('userId name company qualification').lean();
+          if (lead) {
+            eventBus.emitEvent(EVENT_TYPES.LEAD_QUALIFIED_HOT, {
+              leadId,
+              userId: lead.userId,
+              leadName: lead.name,
+              company: lead.company,
+              qualification: lead.qualification,
+            });
+          }
         } else if (eventType === 'new_lead') {
           await executeLeadScoring(leadId);
         }

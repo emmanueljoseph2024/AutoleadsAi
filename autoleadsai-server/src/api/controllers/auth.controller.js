@@ -4,6 +4,7 @@ import {
   generateRefreshToken,
   verifyRefreshToken,
 } from '../../services/auth/token.service.js';
+import { deleteCache, cacheKeys } from '../../services/cache/cache.service.js';
 
 // SIGNUP
 export const signup = async (req, res, next) => {
@@ -66,6 +67,9 @@ export const login = async (req, res, next) => {
     user.lastLogin = new Date();
     await user.save();
 
+    // Invalidate old session cache, new one will be created on next request
+    await deleteCache(cacheKeys.userSession(user._id));
+
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
@@ -102,9 +106,10 @@ export const refreshToken = async (req, res, next) => {
     // Check if token exists in user's list (not stolen/reused)
     const storedToken = user.refreshTokens.find((rt) => rt.token === refreshToken);
     if (!storedToken) {
-      // Possible token reuse attack – clear all tokens
+      // Possible token reuse attack – clear all tokens and cache
       user.refreshTokens = [];
       await user.save();
+      await deleteCache(cacheKeys.userSession(user._id));
       return res.status(401).json({ error: 'Invalid refresh token' });
     }
 
@@ -117,6 +122,9 @@ export const refreshToken = async (req, res, next) => {
       expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
     });
     await user.save();
+
+    // Invalidate old session cache
+    await deleteCache(cacheKeys.userSession(user._id));
 
     res.cookie('refreshToken', newRefreshToken, {
       httpOnly: true,
@@ -140,6 +148,9 @@ export const logout = async (req, res, next) => {
       await User.findByIdAndUpdate(decoded.userId, {
         $pull: { refreshTokens: { token: refreshToken } },
       });
+
+      // Invalidate user session cache on logout
+      await deleteCache(cacheKeys.userSession(decoded.userId));
     }
     res.clearCookie('refreshToken');
     res.status(200).json({ message: 'Logged out successfully' });

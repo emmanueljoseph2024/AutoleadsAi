@@ -6,7 +6,6 @@ import { FaSlack } from 'react-icons/fa';
 import Button from '../common/Button';
 import Badge from '../common/Badge';
 import Skeleton  from '../common/Skeleton';
-import { API_ENDPOINTS } from '../../utils/constants';
 import api from '../../services/api';
 
 interface SlackSettingsProps {

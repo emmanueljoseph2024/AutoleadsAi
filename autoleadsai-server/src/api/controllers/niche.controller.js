@@ -1,4 +1,5 @@
 import Niche from '../../models/Niche.model.js';
+import { invalidateDashboardCache } from '../../services/cache/cache.service.js';
 
 // POST /niches
 export const createNiche = async (req, res, next) => {
@@ -11,6 +12,10 @@ export const createNiche = async (req, res, next) => {
       location,
       sources,
     });
+
+    // Invalidate dashboard cache for this user
+    await invalidateDashboardCache(req.user._id);
+
     res.status(201).json({ niche });
   } catch (error) {
     if (error.code === 11000) {
@@ -60,6 +65,10 @@ export const updateNiche = async (req, res, next) => {
       { new: true, runValidators: true }
     );
     if (!niche) return res.status(404).json({ error: 'Niche not found' });
+
+    // Invalidate dashboard cache for this user
+    await invalidateDashboardCache(req.user._id);
+
     res.status(200).json({ niche });
   } catch (error) {
     next(error);
@@ -71,6 +80,10 @@ export const deleteNiche = async (req, res, next) => {
   try {
     const niche = await Niche.findOneAndDelete({ _id: req.params.id, userId: req.user._id });
     if (!niche) return res.status(404).json({ error: 'Niche not found' });
+
+    // Invalidate dashboard cache for this user
+    await invalidateDashboardCache(req.user._id);
+
     res.status(200).json({ message: 'Niche deleted' });
   } catch (error) {
     next(error);

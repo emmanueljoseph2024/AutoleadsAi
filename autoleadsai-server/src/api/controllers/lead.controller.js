@@ -1,5 +1,6 @@
 import { Lead } from '../../models/index.js';
 import { enqueueWorkflow } from '../../queues/index.js';
+import { invalidateLeadCache } from '../../services/cache/cache.service.js';
 
 // ─── Source metadata helper ─────────────────────────
 
@@ -174,6 +175,9 @@ export const updateLead = async (req, res, next) => {
 
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
 
+    // Invalidate lead cache for this user
+    await invalidateLeadCache(req.user._id);
+
     res.status(200).json({ lead: attachSourceMeta(lead) });
   } catch (error) {
     next(error);
@@ -197,6 +201,9 @@ export const createLead = async (req, res, next) => {
     });
 
     await enqueueWorkflow('new_lead', lead._id);
+
+    // Invalidate lead cache for this user
+    await invalidateLeadCache(req.user._id);
 
     res.status(201).json({ lead: attachSourceMeta(lead.toObject()) });
   } catch (error) {
@@ -234,6 +241,9 @@ export const bulkCreateLeads = async (req, res, next) => {
     const { enqueueBatchLeadProcessing } = await import('../../queues/index.js');
     await enqueueBatchLeadProcessing(created.map((l) => l._id));
 
+    // Invalidate lead cache for this user
+    await invalidateLeadCache(req.user._id);
+
     res.status(201).json({
       message: `${created.length} leads imported successfully`,
       count: created.length,
@@ -253,6 +263,9 @@ export const deleteLead = async (req, res, next) => {
     });
 
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
+
+    // Invalidate lead cache for this user
+    await invalidateLeadCache(req.user._id);
 
     res.status(200).json({ message: 'Lead deleted' });
   } catch (error) {
@@ -274,6 +287,9 @@ export const bulkDeleteLeads = async (req, res, next) => {
       _id: { $in: ids },
       userId: req.user._id,
     });
+
+    // Invalidate lead cache for this user
+    await invalidateLeadCache(req.user._id);
 
     res.status(200).json({
       message: `${deletedCount} leads deleted`,

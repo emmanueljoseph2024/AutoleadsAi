@@ -1,3 +1,5 @@
+// src/events/eventTypes.js
+
 // Centralised event name constants to avoid typos
 
 export const EVENT_TYPES = {
@@ -20,6 +22,7 @@ export const EVENT_TYPES = {
 
   // Scan events
   SCAN_STARTED: 'scan.started',
+  SCAN_PROGRESS: 'scan.progress',
   SCAN_COMPLETED: 'scan.completed',
   SCAN_FAILED: 'scan.failed',
   SCAN_CANCELLED: 'scan.cancelled',
@@ -37,6 +40,10 @@ export const EVENT_TYPES = {
   // Notification events
   SLACK_NOTIFICATION_SENT: 'slack.notification.sent',
   SLACK_NOTIFICATION_FAILED: 'slack.notification.failed',
+  NOTIFICATION_CREATED: 'notification.created',
+
+  // Conversation events
+  CONVERSATION_NEW_MESSAGE: 'conversation.new.message',
 
   // User events
   USER_SIGNUP: 'user.signup',

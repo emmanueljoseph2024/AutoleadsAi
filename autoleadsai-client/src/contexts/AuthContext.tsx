@@ -3,9 +3,10 @@ import {
   useContext,
   useState,
   useEffect,
+  useCallback,
   type ReactNode,
 } from 'react';
-import api from '../services/api.ts';
+import api from '../services/api';
 
 // ------------------------------------------------------------
 // User type (adjust fields to match your actual backend response)
@@ -51,6 +52,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   signup: (formData: SignupPayload) => Promise<void>;
   logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 // ------------------------------------------------------------
@@ -107,35 +109,49 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   // ------------------------------------------------------------
   // Login
   // ------------------------------------------------------------
-  const login = async (email: string, password: string): Promise<void> => {
-    const response = await api.post<AuthResponse>('/auth/login', {
-      email,
-      password,
-    });
+  const login = useCallback(async (email: string, password: string): Promise<void> => {
+    const response = await api.post<AuthResponse>('/auth/login', { email, password });
     localStorage.setItem('accessToken', response.data.accessToken);
     setUser(response.data.user);
-  };
+  }, []);
 
   // ------------------------------------------------------------
   // Signup
   // ------------------------------------------------------------
-  const signup = async (formData: SignupPayload): Promise<void> => {
+  const signup = useCallback(async (formData: SignupPayload): Promise<void> => {
     const response = await api.post<AuthResponse>('/auth/signup', formData);
     localStorage.setItem('accessToken', response.data.accessToken);
     setUser(response.data.user);
-  };
+  }, []);
 
   // ------------------------------------------------------------
   // Logout
   // ------------------------------------------------------------
-  const logout = async (): Promise<void> => {
-    await api.post('/auth/logout');
-    localStorage.removeItem('accessToken');
-    setUser(null);
-  };
+  const logout = useCallback(async (): Promise<void> => {
+    try {
+      await api.post('/auth/logout');
+    } catch {
+      // Proceed with logout even if API call fails
+    } finally {
+      localStorage.removeItem('accessToken');
+      setUser(null);
+    }
+  }, []);
+
+  // ------------------------------------------------------------
+  // Refresh user data
+  // ------------------------------------------------------------
+  const refreshUser = useCallback(async (): Promise<void> => {
+    try {
+      const response = await api.get<{ user: User }>('/auth/me');
+      setUser(response.data.user);
+    } catch {
+      // Silently fail — user will be redirected by ProtectedRoute if token is invalid
+    }
+  }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, signup, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

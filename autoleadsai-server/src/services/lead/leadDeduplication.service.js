@@ -1,31 +1,47 @@
 import { Lead } from '../../models/index.js';
-import { getRedisClient } from '../../config/redis.js';
 import { logger } from '../../utils/logger.js';
+import {
+  getCache,
+  setCache,
+  deleteCachePattern,
+  cacheKeys,
+  DEFAULT_TTL,
+} from '../cache/cache.service.js';
 
 // ─── Check for Duplicate Leads ──────────────────────
 
 export const isDuplicateLead = async (userId, email, sourceUrl) => {
   try {
-    // Check Redis cache first (fast)
-    const redis = getRedisClient();
-    const cacheKey = `dedup:${userId}:${email}`;
-    const cached = await redis.get(cacheKey);
-    if (cached === '1') return true;
+    // Check Redis cache first (fast) — email
+    if (email) {
+      const emailKey = cacheKeys.dedupEmail(userId, email);
+      const emailCached = await getCache(emailKey);
+      if (emailCached === '1') return true;
+    }
+
+    // Check Redis cache — source URL
+    if (sourceUrl) {
+      const urlKey = cacheKeys.dedupUrl(userId, sourceUrl);
+      const urlCached = await getCache(urlKey);
+      if (urlCached === '1') return true;
+    }
 
     // Check MongoDB
     const existing = await Lead.findOne({
       userId,
-      $or: [{ email }, { sourceUrl: sourceUrl || '' }],
+      $or: [{ email: email || '' }, { sourceUrl: sourceUrl || '' }],
     });
 
     if (existing) {
-      // Cache the result for 1 hour
-      await redis.set(cacheKey, '1', 'EX', 3600);
+      // Cache the hit
+      if (email) await setCache(cacheKeys.dedupEmail(userId, email), '1', DEFAULT_TTL.DEDUP_HIT);
+      if (sourceUrl) await setCache(cacheKeys.dedupUrl(userId, sourceUrl), '1', DEFAULT_TTL.DEDUP_HIT);
       return true;
     }
 
-    // Cache negative result for 5 minutes
-    await redis.set(cacheKey, '0', 'EX', 300);
+    // Cache negative result
+    if (email) await setCache(cacheKeys.dedupEmail(userId, email), '0', DEFAULT_TTL.DEDUP_MISS);
+    if (sourceUrl) await setCache(cacheKeys.dedupUrl(userId, sourceUrl), '0', DEFAULT_TTL.DEDUP_MISS);
     return false;
   } catch (error) {
     logger.error(`Failed to check duplicate lead for user ${userId}:`, error);
@@ -50,7 +66,7 @@ export const deduplicateLeads = async (userId, leads) => {
         continue;
       }
 
-      // Check against existing leads in DB
+      // Check against existing leads in DB (with cache)
       const isDuplicate = await isDuplicateLead(userId, email, sourceUrl);
       if (isDuplicate) continue;
 
@@ -116,6 +132,13 @@ export const findAndMergeDuplicates = async (userId) => {
       // Delete the duplicates
       await Lead.deleteMany({ _id: { $in: mergeIds } });
       mergedCount += mergeIds.length;
+
+      // Clear dedup cache after merge
+      for (const mergeLead of mergeLeads) {
+        if (mergeLead.email) {
+          await setCache(cacheKeys.dedupEmail(userId, mergeLead.email), null, 1);
+        }
+      }
     }
 
     logger.info(`Merged ${mergedCount} duplicate leads for user ${userId}`);
@@ -130,12 +153,7 @@ export const findAndMergeDuplicates = async (userId) => {
 
 export const clearDedupCache = async (userId) => {
   try {
-    const redis = getRedisClient();
-    const pattern = `dedup:${userId}:*`;
-    const keys = await redis.keys(pattern);
-    if (keys.length > 0) {
-      await redis.del(keys);
-    }
+    await deleteCachePattern(`dedup:${userId}:*`);
     logger.info(`Dedup cache cleared for user ${userId}`);
   } catch (error) {
     logger.error(`Failed to clear dedup cache for user ${userId}:`, error);

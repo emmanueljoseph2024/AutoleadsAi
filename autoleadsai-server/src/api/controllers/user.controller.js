@@ -1,5 +1,6 @@
 import { User } from '../../models/index.js';
 import bcrypt from 'bcryptjs';
+import { deleteCache, cacheKeys } from '../../services/cache/cache.service.js';
 
 // GET /users/me – full profile (already covered by auth/me, but this can be more detailed)
 export const getProfile = async (req, res, next) => {
@@ -25,6 +26,10 @@ export const updateProfile = async (req, res, next) => {
       runValidators: true,
     });
 
+    // Invalidate user profile and session cache
+    await deleteCache(cacheKeys.userProfile(req.user._id));
+    await deleteCache(cacheKeys.userSession(req.user._id));
+
     res.status(200).json({ user: user.toJSON() });
   } catch (error) {
     next(error);
@@ -44,6 +49,10 @@ export const updatePassword = async (req, res, next) => {
     user.password = newPassword;
     await user.save();
 
+    // Invalidate all user caches — password change is a security event
+    await deleteCache(cacheKeys.userProfile(req.user._id));
+    await deleteCache(cacheKeys.userSession(req.user._id));
+
     res.status(200).json({ message: 'Password updated' });
   } catch (error) {
     next(error);
@@ -54,6 +63,11 @@ export const updatePassword = async (req, res, next) => {
 export const deleteAccount = async (req, res, next) => {
   try {
     await User.findByIdAndUpdate(req.user._id, { isActive: false });
+
+    // Invalidate all user caches — account deactivation
+    await deleteCache(cacheKeys.userProfile(req.user._id));
+    await deleteCache(cacheKeys.userSession(req.user._id));
+
     res.status(200).json({ message: 'Account deactivated' });
   } catch (error) {
     next(error);

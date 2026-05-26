@@ -67,6 +67,14 @@ const leadSchema = new mongoose.Schema(
   ref: 'Niche',
   index: true,
 },
+linkPreview: {
+  title: String,
+  description: String,
+  image: String,
+  favicon: String,
+  domain: String,
+  siteName: String,
+},
   },
   {
     timestamps: true,

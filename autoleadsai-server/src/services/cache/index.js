@@ -1,0 +1,15 @@
+export {
+  getCachedOrFetch,
+  setCache,
+  getCache,
+  deleteCache,
+  deleteCachePattern,
+  incrementCache,
+  existsCache,
+  cacheKeys,
+  invalidateUserCache,
+  invalidateDashboardCache,
+  invalidateLeadCache,
+  invalidateScanCache,
+  DEFAULT_TTL,
+} from './cache.service.js';
