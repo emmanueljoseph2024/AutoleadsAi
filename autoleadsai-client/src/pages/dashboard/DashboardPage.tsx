@@ -19,6 +19,7 @@ import {
   FiTarget,
   FiAlertCircle,
   FiRefreshCw,
+  FiExternalLink,
 } from 'react-icons/fi';
 import { FaLinkedinIn, FaRedditAlien } from 'react-icons/fa';
 import { SiX } from 'react-icons/si';
@@ -289,11 +290,60 @@ const DashboardPage = () => {
             </div>
           </div>
 
+          {/* Real-Time Monitoring */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+            <div className="bg-white rounded-2xl border border-[#E5E7EB] p-4 sm:p-6">
+              <h3 className="text-base sm:text-lg font-bold text-[#111827] mb-4">Real-Time Monitoring</h3>
+              <div className="space-y-3">
+                {[
+                  { platform: 'linkedin', label: 'LinkedIn', message: 'Scanning for real estate agents...' },
+                  { platform: 'reddit', label: 'Reddit', message: 'Monitoring r/realestate...' },
+                  { platform: 'twitter', label: 'X (Twitter)', message: 'Tracking #realestate mentions...' },
+                ].map((item) => (
+                  <div key={item.platform} className="flex items-center gap-3 p-3 rounded-xl bg-[#F9FAFB]">
+                    <div className="w-8 h-8 bg-white rounded-lg flex items-center justify-center shadow-sm border border-[#E5E7EB] shrink-0">
+                      {getPlatformIcon(item.platform)}
+                    </div>
+                    <div className="grow min-w-0">
+                      <p className="text-xs text-[#9CA3AF]">{item.label}</p>
+                      <p className="text-sm font-medium text-[#111827] truncate">{item.message}</p>
+                    </div>
+                    <span className="w-2 h-2 bg-[#22C55E] rounded-full animate-pulse shrink-0" />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl border border-[#E5E7EB] p-4 sm:p-6">
+              <h3 className="text-base sm:text-lg font-bold text-[#111827] mb-4">Channel Performance</h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-[#F9FAFB] rounded-xl p-4 text-center">
+                  <div className="w-8 h-8 bg-[#EFF6FF] rounded-lg flex items-center justify-center mx-auto mb-2">
+                    <FiTarget className="w-4 h-4 text-[#2563EB]" />
+                  </div>
+                  <p className="text-xs text-[#6B7280] mb-1">Inbound</p>
+                  <p className="text-xl sm:text-2xl font-bold text-[#111827]">2,451</p>
+                  <p className="text-[10px] text-[#9CA3AF] mt-1">Conversation Rate</p>
+                  <p className="text-sm font-semibold text-[#22C55E]">12.8%</p>
+                </div>
+                <div className="bg-[#F9FAFB] rounded-xl p-4 text-center">
+                  <div className="w-8 h-8 bg-[#EEF2FF] rounded-lg flex items-center justify-center mx-auto mb-2">
+                    <FiMail className="w-4 h-4 text-[#4F46E5]" />
+                  </div>
+                  <p className="text-xs text-[#6B7280] mb-1">Outbound</p>
+                  <p className="text-xl sm:text-2xl font-bold text-[#111827]">5,128</p>
+                  <p className="text-[10px] text-[#9CA3AF] mt-1">Conversation Rate</p>
+                  <p className="text-sm font-semibold text-[#22C55E]">8.4%</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
           {!loading && stats?.samples?.hotLeads && stats.samples.hotLeads.length > 0 && (
             <div className="bg-white rounded-2xl border border-[#E5E7EB] p-4 sm:p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-base sm:text-lg font-bold text-[#111827]">🔥 Hot Leads This Week</h3>
-                <Link to="/leads?qualification=hot" className="text-xs sm:text-sm text-[#2563EB] hover:underline font-medium">View All Hot Leads</Link>
+                <Link to="/leads?qualification=hot" className="text-xs sm:text-sm text-[#2563EB] hover:underline font-medium">View All Hot Leads <FiExternalLink className="w-3 h-3 inline" /></Link>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full">

@@ -7,7 +7,7 @@ const NotFoundPage = () => {
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-[#F9FAFB]">
       <div className="text-center max-w-md animate-slide-up">
-        <div className="w-20 h-20 bg-gradient-to-br from-[#2563EB] to-[#4F46E5] rounded-3xl flex items-center justify-center mx-auto mb-8 shadow-lg">
+        <div className="w-20 h-20 bg-linear-to-br from-[#2563EB] to-[#4F46E5] rounded-3xl flex items-center justify-center mx-auto mb-8 shadow-lg">
           <img src={AutoleadsAiLogo} alt="AutoLeads AI" className="w-10 h-10" />
         </div>
 
